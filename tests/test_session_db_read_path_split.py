@@ -12,6 +12,7 @@ import threading
 
 import pytest
 
+import hermes_state
 from hermes_state import SessionDB
 
 
@@ -129,3 +130,24 @@ def test_anchored_view_and_around_use_read_path(db):
         assert done["view"]["window"]
     finally:
         db._lock.release()
+
+
+@pytest.mark.requires_wal
+def test_worker_read_connection_allows_cross_thread_close(
+    db, monkeypatch: pytest.MonkeyPatch
+):
+    """close() drains worker-owned read connections from the main thread."""
+    calls = []
+    real_connect = hermes_state._connect_tracked_db
+
+    def tracked_connect(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(hermes_state, "_connect_tracked_db", tracked_connect)
+    thread = threading.Thread(target=db._get_read_conn)
+    thread.start()
+    thread.join(timeout=5.0)
+    assert not thread.is_alive()
+    assert calls
+    assert calls[-1].get("check_same_thread") is False

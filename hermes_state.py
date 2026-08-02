@@ -2116,6 +2116,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 f"file:{self.db_path}?mode=ro",
                 tracking_path=self.db_path,
                 uri=True,
+                check_same_thread=False,
                 timeout=5.0,
                 isolation_level=None,
             )
@@ -3972,16 +3973,21 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
     def get_compression_lock_holder(self, session_id: str) -> Optional[str]:
         """Return the current (non-expired) holder for ``session_id``, or None.
 
-        Diagnostic helper — not used by the locking protocol itself.
+        Diagnostic helper — not used by the locking protocol itself. Route the
+        SELECT through ``_read_ctx`` so gateway ``asyncio.to_thread`` callers
+        never race the shared writer connection used by transcript appends and
+        asynchronous token accounting.
         """
         if not session_id:
             return None
         now = time.time()
-        row = self._conn.execute(
-            "SELECT holder FROM compression_locks "
-            "WHERE session_id = ? AND expires_at >= ?",
-            (session_id, now),
-        ).fetchone()
+        with self._read_ctx() as conn:
+            assert conn is not None
+            row = conn.execute(
+                "SELECT holder FROM compression_locks "
+                "WHERE session_id = ? AND expires_at >= ?",
+                (session_id, now),
+            ).fetchone()
         if row is None:
             return None
         return row["holder"] if isinstance(row, sqlite3.Row) else row[0]

@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -223,3 +224,22 @@ def test_concurrent_acquire_only_one_winner(db: SessionDB) -> None:
     assert sum(1 for r in results if r is False) == 7
     # The single winner still owns it
     assert db.get_compression_lock_holder("contended_session") is not None
+
+
+def test_get_compression_lock_holder_uses_read_context(
+    db: SessionDB, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The diagnostic read must not race the shared writer connection."""
+    assert db.try_acquire_compression_lock("sess-read", "holder") is True
+    real_read_ctx = db._read_ctx
+    entered: list[bool] = []
+
+    @contextmanager
+    def tracked_read_ctx():
+        entered.append(True)
+        with real_read_ctx() as conn:
+            yield conn
+
+    monkeypatch.setattr(db, "_read_ctx", tracked_read_ctx)
+    assert db.get_compression_lock_holder("sess-read") == "holder"
+    assert entered == [True]
