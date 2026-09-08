@@ -1205,6 +1205,15 @@ class TestDetectVenvDir:
         assert result is None
 
 
+def test_build_user_local_paths_ignores_permission_errors(monkeypatch, tmp_path):
+    """A generated user unit must not fail when a foreign home is unreadable."""
+    def _denied(_path):
+        raise PermissionError("foreign home")
+
+    monkeypatch.setattr(Path, "exists", _denied)
+    assert gateway_cli._build_user_local_paths(tmp_path, []) == []
+
+
 class TestSystemUnitHermesHome:
     """HERMES_HOME in system units must reference the target user, not root."""
 
