@@ -6,7 +6,7 @@ import logging
 from typing import List, Optional
 
 from toolsets import TOOLSETS
-from tools.delegate_tool_config import _get_inherit_mcp_toolsets
+from tools.delegate_tool_config import _get_configured_child_toolsets, _get_inherit_mcp_toolsets
 
 logger = logging.getLogger("tools.delegate_tool")  # log-record parity with the origin module
 
@@ -65,46 +65,89 @@ def _blocked_toolsets_for_role(role: str) -> List[str]:
         name for name, defn in TOOLSETS.items() if defn.get("tools") and set(defn.get("tools", ())).issubset(blocked_names)
     )
 
+
+def _tool_names(toolsets: List[str]) -> set[str]:
+    """Resolve a list of known toolsets to its effective tool names."""
+    from toolsets import resolve_toolset
+
+    return {tool for toolset in toolsets for tool in resolve_toolset(toolset)}
+
+
+def _configured_child_toolsets_allow(toolsets: List[str]) -> Optional[bool]:
+    """Whether a configured worker policy allows a trusted caller's narrowing.
+
+    ``None`` means no configured policy, so the caller must use legacy
+    parent-surface rules. ``False`` is intentionally fail-closed.
+    """
+    configured = _get_configured_child_toolsets()
+    if configured is None:
+        return None
+    from toolsets import validate_toolset
+
+    if not all(isinstance(toolset, str) and validate_toolset(toolset) for toolset in toolsets):
+        return False
+    try:
+        return _tool_names(toolsets).issubset(_tool_names(configured))
+    except Exception:
+        logger.warning("Could not resolve delegation.child_toolsets; denying requested child tools", exc_info=True)
+        return False
+
 def _resolve_child_toolsets(
     parent_agent, toolsets: Optional[List[str]], effective_role: str
 ) -> tuple[List[str], List[str]]:
-    """``(enabled_toolsets, disabled_toolsets)`` for a child. Children never gain tools the parent lacks: explicit
-    ``toolsets`` are intersected with the parent's (composite-expanded) set, else the parent's enabled set is
-    inherited. Blocked tools are stripped twice — whole blocked toolsets here, and exact one-tool deny toolsets via
-    ``disabled_toolsets`` so blocked names inside mixed bundles (hermes-cli) are subtracted AFTER composite
-    expansion and survive registry refreshes. Orchestrators get ``delegation`` re-added unconditionally
-    (role-granted, not inherited)."""
-    # enabled_toolsets=None means "all tools", so derive from loaded tool names.
-    parent_enabled = getattr(parent_agent, "enabled_toolsets", None)
-    if parent_enabled is not None:
-        parent_toolsets = set(parent_enabled)
-    elif parent_agent and hasattr(parent_agent, "valid_tool_names"):
-        import model_tools
-        parent_toolsets = {
-            ts for name in parent_agent.valid_tool_names if (ts := model_tools.get_toolset_for_tool(name)) is not None
-        }
-    else:
-        parent_toolsets = set(DEFAULT_TOOLSETS)
+    """``(enabled_toolsets, disabled_toolsets)`` for a child.
 
-    if toolsets:
-        expanded_parent = _expand_parent_toolsets(parent_toolsets)
-        child_toolsets = [t for t in toolsets if t in expanded_parent]
-        if _get_inherit_mcp_toolsets():
-            # Append any parent MCP toolsets missing from the narrowed child.
-            child_toolsets += [
-                name for name in sorted(parent_toolsets) if _is_mcp_toolset_name(name) and name not in child_toolsets
-            ]
-    elif parent_agent and parent_enabled is not None:
-        child_toolsets = parent_enabled
+    An absent ``delegation.child_toolsets`` preserves legacy inheritance. When
+    configured, it is an exact operator-owned worker surface: parent enables
+    and disables are not inherited, and a trusted caller may only request a
+    semantic subset. Blocked tools remain blocked in both modes.
+    """
+    configured = _get_configured_child_toolsets()
+    using_worker_policy = configured is not None
+    if using_worker_policy:
+        if toolsets and _configured_child_toolsets_allow(toolsets):
+            child_toolsets = list(toolsets)
+        elif toolsets:
+            child_toolsets = []
+        else:
+            child_toolsets = list(configured)
     else:
-        child_toolsets = sorted(parent_toolsets) or DEFAULT_TOOLSETS
+        # enabled_toolsets=None means "all tools", so derive from loaded tool names.
+        parent_enabled = getattr(parent_agent, "enabled_toolsets", None)
+        if parent_enabled is not None:
+            parent_toolsets = set(parent_enabled)
+        elif parent_agent and hasattr(parent_agent, "valid_tool_names"):
+            import model_tools
+            parent_toolsets = {
+                ts for name in parent_agent.valid_tool_names if (ts := model_tools.get_toolset_for_tool(name)) is not None
+            }
+        else:
+            parent_toolsets = set(DEFAULT_TOOLSETS)
+
+        if toolsets:
+            expanded_parent = _expand_parent_toolsets(parent_toolsets)
+            child_toolsets = [t for t in toolsets if t in expanded_parent]
+            if _get_inherit_mcp_toolsets():
+                # Append any parent MCP toolsets missing from the narrowed child.
+                child_toolsets += [
+                    name for name in sorted(parent_toolsets) if _is_mcp_toolset_name(name) and name not in child_toolsets
+                ]
+        elif parent_agent and parent_enabled is not None:
+            child_toolsets = parent_enabled
+        else:
+            child_toolsets = sorted(parent_toolsets) or DEFAULT_TOOLSETS
+    # ``_strip_blocked_tools`` intentionally removes delegation for ordinary
+    # children. Preserve the authorization decision before that role-neutral
+    # stripping so an orchestrator gets it back only when its selected surface
+    # explicitly contains it (or under legacy inheritance).
+    delegation_authorized = not using_worker_policy or "delegation" in child_toolsets
     child_toolsets = _strip_blocked_tools(child_toolsets)
 
-    raw_parent_disabled = getattr(parent_agent, "disabled_toolsets", None)
+    raw_parent_disabled = None if using_worker_policy else getattr(parent_agent, "disabled_toolsets", None)
     inherited_disabled = (
         [str(name) for name in raw_parent_disabled] if isinstance(raw_parent_disabled, (list, tuple, set)) else []
     )
-    if effective_role == "orchestrator":
+    if effective_role == "orchestrator" and delegation_authorized:
         inherited_disabled = [name for name in inherited_disabled if name != "delegation"]
         if "delegation" not in child_toolsets:
             child_toolsets.append("delegation")

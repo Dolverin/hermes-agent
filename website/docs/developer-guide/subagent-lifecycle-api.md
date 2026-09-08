@@ -55,7 +55,9 @@ starts a replacement child. Running Python threads also cannot survive process
 exit; callers must treat those handles as interrupted by process exit.
 
 Requests are fail-closed: goal/context/metadata sizes are capped, unknown or
-parent-broadening toolsets are rejected, and per-tool blocks, working-directory
-overrides, and per-launch timeouts are explicitly rejected until Hermes can
-support them without weakening isolation. Use `allowed_toolsets` to narrow a
-child; Hermes's existing unsafe-tool block remains enforced.
+parent-broadening toolsets are rejected by default, and per-tool blocks,
+working-directory overrides, and per-launch timeouts are explicitly rejected
+until Hermes can support them without weakening isolation. When the active
+profile configures `delegation.child_toolsets`, that explicit worker allowlist
+replaces the parent-surface check: `allowed_toolsets` may narrow it but cannot
+broaden it. Hermes's existing unsafe-tool block remains enforced.

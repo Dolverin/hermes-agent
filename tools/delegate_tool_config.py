@@ -26,6 +26,13 @@ _LEGACY_MAX_ASYNC_WARNED = False
 # delegation.child_timeout_seconds opts back in.
 DEFAULT_CHILD_TIMEOUT: Optional[float] = None
 
+
+class _ChildToolsetConfigLoadFailed:
+    """Typed sentinel so a policy-read failure cannot be mistaken for absence."""
+
+
+_CHILD_TOOLSET_CONFIG_LOAD_FAILED = _ChildToolsetConfigLoadFailed()
+
 def _cfg() -> dict:
     """The ``delegation`` section, read through the origin so tests can patch it."""
     from tools.delegate_tool import _load_config
@@ -165,6 +172,65 @@ def _get_orchestrator_enabled() -> bool:
 def _get_inherit_mcp_toolsets() -> bool:
     """Whether narrowed child toolsets should keep the parent's MCP toolsets."""
     return is_truthy_value(_cfg().get("inherit_mcp_toolsets"), default=True)
+
+
+def _load_child_toolset_policy_config() -> dict | _ChildToolsetConfigLoadFailed:
+    """Read the active profile's delegation map without the legacy CLI fallback.
+
+    The generic delegation loader preserves historical recovery behavior for
+    non-authorization settings. A worker capability boundary must not recover
+    from a profile-read failure by consulting another session's CLI snapshot.
+    """
+    try:
+        if os.environ.get("HERMES_IGNORE_USER_CONFIG") == "1":
+            from cli import CLI_CONFIG
+            config = CLI_CONFIG
+        else:
+            from hermes_cli.config import require_readable_config_before_write
+            # Capability policy is deliberately read from the raw active profile.
+            # The merged loader recovers unrelated schema failures to defaults or
+            # a last-known-good snapshot; either fallback could hide an explicit
+            # deny policy and restore parent inheritance. This helper only
+            # validates/reads and never writes.
+            config = require_readable_config_before_write()
+    except Exception:
+        logger.warning("Could not read delegation.child_toolsets from the active profile; denying child tools", exc_info=True)
+        return _CHILD_TOOLSET_CONFIG_LOAD_FAILED
+    if not isinstance(config, dict):
+        logger.warning("Active delegation configuration is malformed; denying child tools")
+        return _CHILD_TOOLSET_CONFIG_LOAD_FAILED
+    delegation_cfg = config.get("delegation", {})
+    if not isinstance(delegation_cfg, dict):
+        logger.warning("delegation configuration is malformed; denying child tools")
+        return _CHILD_TOOLSET_CONFIG_LOAD_FAILED
+    return delegation_cfg
+
+
+def _get_configured_child_toolsets() -> Optional[List[str]]:
+    """Operator-owned child capability policy, or ``None`` for legacy inheritance.
+
+    ``delegation.child_toolsets`` deliberately has no wildcard: it is the one
+    configuration boundary allowed to give workers tools their parent cannot
+    use. A malformed policy therefore resolves to an empty list rather than
+    falling back to the parent's surface.
+    """
+    delegation_cfg = _load_child_toolset_policy_config()
+    if isinstance(delegation_cfg, _ChildToolsetConfigLoadFailed):
+        return []
+    if "child_toolsets" not in delegation_cfg:
+        return None
+    raw = delegation_cfg["child_toolsets"]
+    if not isinstance(raw, list) or not all(isinstance(name, str) for name in raw):
+        logger.warning("delegation.child_toolsets must be a list of known toolset names; denying child tools")
+        return []
+
+    from toolsets import validate_toolset
+
+    unknown = [name for name in raw if not name or name in {"all", "*"} or not validate_toolset(name)]
+    if unknown:
+        logger.warning("delegation.child_toolsets contains unknown or wildcard toolsets; denying child tools")
+        return []
+    return list(dict.fromkeys(raw))
 
 def _normalized_runtime_url(value: Any) -> str:
     return str(value or "").strip().rstrip("/")

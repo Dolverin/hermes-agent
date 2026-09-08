@@ -1654,6 +1654,9 @@ delegation:
                                               # The parent TUI owns stdin, so blocking would deadlock; non-interactive resolution is required.
                                               # Both choices emit a logger.warning audit line. Flip to true only for cron/batch pipelines.
   # inherit_mcp_toolsets: true                # When explicit child toolsets are narrowed, also keep the parent's MCP toolsets (default: true). Set false for strict intersection.
+  # child_toolsets: [file, terminal, web]    # Optional worker-only allowlist. When set, children use exactly these toolsets even if the parent lacks them;
+                                              # parent enabled/disabled toolsets are not inherited. Omit to preserve parent inheritance. [] denies all worker tools.
+                                              # `all`/`*`, unknown, or malformed entries fail closed to no worker tools.
   # model: "google/gemini-3-flash-preview"    # Override model for subagents (empty = inherit parent)
   # provider: "openrouter"                    # Override provider for subagents (empty = inherit parent)
   #                                           # Resolves full credentials (base_url, api_key) automatically.

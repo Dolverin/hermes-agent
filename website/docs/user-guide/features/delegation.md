@@ -304,7 +304,9 @@ Credentials resolve exactly like a `delegation.provider` pin (full runtime-provi
 
 ## Inherited Tool Access
 
-`delegate_task` does not accept a model-facing `toolsets` parameter. Each subagent inherits the parent's enabled toolsets so the model cannot grant a child capabilities that the parent does not have. Configure the parent's tools before starting the conversation if delegated work needs additional capabilities.
+`delegate_task` does not accept a model-facing `toolsets` parameter. By default, each subagent inherits the parent's enabled toolsets so the model cannot grant a child capabilities that the parent does not have. Configure the parent's tools before starting the conversation if delegated work needs additional capabilities.
+
+For an operator-owned parent/worker boundary, set `delegation.child_toolsets` in the active profile. This explicit allowlist replaces parent inheritance for every child, which lets a planning-only parent delegate to workers with a separate operational set. The model cannot alter it; `all`/`*`, unknown, and malformed values deny worker tools rather than expanding access. See [Configuration → Delegation](../configuration.md#delegation).
 
 Certain tools are blocked for subagents even when the parent has them:
 - `delegate_task` — blocked for leaf subagents (the default). Retained for `role="orchestrator"` children, bounded by `max_spawn_depth` — see [Depth Limit and Nested Orchestration](#depth-limit-and-nested-orchestration) below.
@@ -606,6 +608,7 @@ delegation:
   # worktree_isolation: false               # Give each child its own git worktree (see Worktree Isolation above)
   # max_spawn_depth: 1                      # Tree depth (floor 1, no ceiling, default 1 = flat). Raise to 2 to allow orchestrator children to spawn leaves; 3+ for deeper trees.
   # orchestrator_enabled: true              # Disable to force all children to leaf role.
+  # child_toolsets: [file, terminal, web]  # Optional worker-only allowlist; omit to inherit the parent surface.
   model: "google/gemini-3-flash-preview"             # Optional provider/model override
   provider: "openrouter"                             # Optional built-in provider
   api_mode: anthropic_messages                       # optional; auto-detected from base_url for anthropic_messages endpoints

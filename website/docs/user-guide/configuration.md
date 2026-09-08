@@ -2700,9 +2700,19 @@ delegation:
   worktree_isolation: false                 # Give each child its own git worktree branched from HEAD (local backend + git repos only; inspired by Muse Code). See Subagent Delegation → Worktree Isolation.
   max_spawn_depth: 1                        # Delegation tree depth cap (1-3, clamped). 1 = flat (default): parent spawns leaves that cannot delegate. 2 = orchestrator children can spawn leaf grandchildren. 3 = three levels.
   orchestrator_enabled: true                # Global kill switch. When false, role="orchestrator" is ignored and every child is forced to leaf regardless of max_spawn_depth.
+  # child_toolsets: [file, terminal, web]   # Optional worker-only allowlist; absent = inherit the parent surface.
 ```
 
 **Subagent provider:model override:** By default, subagents inherit the parent agent's provider and model. Set `delegation.provider` and `delegation.model` to route subagents to a different provider:model pair — e.g., use a cheap/fast model for narrowly-scoped subtasks while your primary agent runs an expensive reasoning model.
+
+**Worker tool boundary:** Normally children inherit their parent's non-blocked toolsets. To run a planning/orchestration parent with a smaller surface while granting workers a deliberately separate operational surface, set `delegation.child_toolsets` to an explicit list:
+
+```yaml
+delegation:
+  child_toolsets: [file, terminal, web]
+```
+
+When this key is present, every `delegate_task` child receives exactly that worker allowlist (subject to Hermes's always-blocked child tools); the parent's enabled and disabled toolsets are not inherited. The public subagent lifecycle API may narrow this surface but cannot request a tool outside it. Omit the key to retain legacy parent inheritance. `[]`, `all`/`*`, unknown names, and malformed values fail closed: they give children no configured worker tools. The policy is read from the active profile at child construction, so it never crosses profiles or retroactively changes an existing session.
 
 **Subagent fallback chain:** Set `delegation.fallback_providers` to give workers their own chain (same entry shape as the top-level list). An explicitly pinned child (by provider, endpoint, or model) uses that chain only when it is declared; otherwise it fails loudly instead of borrowing the parent agent's route. For an unpinned child, an absent or `null` setting preserves parent-chain inheritance. Use `fallback_providers: []` under `delegation:` to disable child fallback entirely.
 

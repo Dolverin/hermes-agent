@@ -407,10 +407,16 @@ class SubagentLifecycleService:
             raise SubagentLifecycleError("metadata exceeds 8192 bytes.")
         if not request.allowed_toolsets:
             return
-        from toolsets import TOOLSETS
-        unknown = set(request.allowed_toolsets) - set(TOOLSETS)
+        from toolsets import validate_toolset
+        unknown = {toolset for toolset in request.allowed_toolsets if not validate_toolset(toolset)}
         if unknown:
             raise SubagentLifecycleError(f"Unknown toolsets: {', '.join(sorted(unknown))}.")
+        from tools.delegate_tool_toolsets import _configured_child_toolsets_allow
+        worker_policy_allows = _configured_child_toolsets_allow(list(request.allowed_toolsets))
+        if worker_policy_allows is False:
+            raise SubagentLifecycleError("Requested toolsets are not permitted by delegation.child_toolsets.")
+        if worker_policy_allows is True:
+            return
         enabled = getattr(parent, "enabled_toolsets", None)
         if enabled is not None and not set(request.allowed_toolsets).issubset(set(enabled)):
             raise SubagentLifecycleError("Requested toolsets would broaden parent permissions.")
