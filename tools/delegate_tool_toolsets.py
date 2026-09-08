@@ -47,6 +47,29 @@ def _expand_parent_toolsets(parent_toolsets: set) -> set:
         )
     return expanded
 
+
+def _bound_room_policy_toolsets() -> Optional[set]:
+    """Current target-issued RoomLink authority ceiling, if this is a hosted turn.
+
+    ``delegation.child_toolsets`` may intentionally exceed ordinary parent
+    visibility, but it cannot exceed an execution policy that was authenticated
+    and bound to this hosted turn.
+    """
+    try:
+        from gateway.hosted_room_execution_policy import current_room_execution_policy
+        policy = current_room_execution_policy()
+    except Exception:
+        logger.warning("Could not read bound room execution policy; denying child tools", exc_info=True)
+        return set()
+    if policy is None:
+        return None
+    enabled = getattr(policy, "enabled_toolsets", ())
+    if not isinstance(enabled, (list, tuple, set, frozenset)):
+        logger.warning("Bound room execution policy has invalid toolsets; denying child tools")
+        return set()
+    return _expand_parent_toolsets(set(enabled))
+
+
 def _strip_blocked_tools(toolsets: List[str]) -> List[str]:
     """Remove toolsets whose tools are ALL blocked (derived from DELEGATE_BLOCKED_TOOLS so the two can't drift) plus
     composite toolsets children must never get (``delegation``, ``kanban``)."""
@@ -136,6 +159,11 @@ def _resolve_child_toolsets(
             child_toolsets = parent_enabled
         else:
             child_toolsets = sorted(parent_toolsets) or DEFAULT_TOOLSETS
+    # A route/turn policy is an immutable outer authority boundary. Apply it
+    # after the worker-policy choice so explicit worker configuration cannot
+    # silently bypass a target-issued hosted-room restriction.
+    if (room_ceiling := _bound_room_policy_toolsets()) is not None:
+        child_toolsets = [toolset for toolset in child_toolsets if toolset in room_ceiling]
     # ``_strip_blocked_tools`` intentionally removes delegation for ordinary
     # children. Preserve the authorization decision before that role-neutral
     # stripping so an orchestrator gets it back only when its selected surface

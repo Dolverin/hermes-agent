@@ -168,6 +168,38 @@ export function AutoField({
     );
   }
 
+  if (schema.type === "optional-list") {
+    const overridden = Array.isArray(value);
+    return (
+      <div className="grid gap-1.5">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5">
+            <Label className="text-sm">{label}</Label>
+            <FieldHint schema={schema} schemaKey={schemaKey} />
+          </div>
+          <Switch
+            checked={overridden}
+            onCheckedChange={(enabled) => onChange(enabled ? [] : null)}
+          />
+        </div>
+        {overridden && (
+          <Input
+            value={value.join(", ")}
+            onChange={(e) =>
+              onChange(
+                e.target.value
+                  .split(",")
+                  .map((item) => item.trim())
+                  .filter(Boolean),
+              )
+            }
+            placeholder="comma-separated toolset names"
+          />
+        )}
+      </div>
+    );
+  }
+
   if (schema.type === "list") {
     return (
       <div className="grid gap-1.5">

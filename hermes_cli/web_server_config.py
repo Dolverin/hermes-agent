@@ -130,6 +130,14 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "Reasoning effort for delegated subagents",
         "", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
     ),
+    "delegation.child_toolsets": {
+        "type": "optional-list",
+        "description": (
+            "Optional worker capability allowlist. Inherit keeps legacy parent tool inheritance; "
+            "an empty override denies all child tools."
+        ),
+        "category": "delegation",
+    },
     "updates.non_interactive_local_changes": _select(
         "When the chat app / gateway updates Hermes (no terminal prompt), "
         "what to do with uncommitted local source edits. 'stash' keeps them "
@@ -226,13 +234,14 @@ def _build_schema_from_config(config: Dict[str, Any], prefix: str = "") -> Dict[
 
 
 def _config_schema_with_virtual_fields() -> Dict[str, Dict[str, Any]]:
-    """DEFAULT_CONFIG schema plus the virtual ``model_context_length`` field, inserted right
-    after ``model`` so it renders adjacent in the frontend."""
+    """DEFAULT_CONFIG schema plus virtual fields absent from persisted defaults."""
     ordered: Dict[str, Dict[str, Any]] = {}
     for key, entry in _build_schema_from_config(DEFAULT_CONFIG).items():
         ordered[key] = entry
         if key == "model":
             ordered["model_context_length"] = _SCHEMA_OVERRIDES["model_context_length"]
+        if key == "delegation.inherit_mcp_toolsets":
+            ordered["delegation.child_toolsets"] = _SCHEMA_OVERRIDES["delegation.child_toolsets"]
     return ordered
 
 

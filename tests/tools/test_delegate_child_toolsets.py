@@ -64,6 +64,37 @@ def test_worker_policy_rejects_unconfigured_requested_toolsets(monkeypatch):
     assert child == []
 
 
+def test_worker_policy_cannot_exceed_bound_room_execution_policy(monkeypatch):
+    """A target-issued room policy remains the authority ceiling for child tools."""
+    from gateway.hosted_room_execution_policy import (
+        RoomExecutionPolicy,
+        bind_room_execution_policy,
+        reset_room_execution_policy,
+    )
+
+    monkeypatch.setattr(
+        "tools.delegate_tool_toolsets._get_configured_child_toolsets",
+        lambda: ["file", "terminal"],
+    )
+    policy = RoomExecutionPolicy(
+        version=1,
+        target_profile="reviewer",
+        enabled_toolsets=("bot_room", "delegation", "file"),
+        approval_mode="manual",
+        max_iterations=1,
+        policy_digest="test-policy",
+    )
+    token = bind_room_execution_policy(policy)
+    try:
+        child, _disabled = _resolve_child_toolsets(
+            _parent(enabled=["delegation"]), None, "leaf"
+        )
+    finally:
+        reset_room_execution_policy(token)
+
+    assert child == ["file"]
+
+
 def test_lifecycle_request_accepts_worker_policy_not_parent_surface(monkeypatch):
     """The public worker API observes the same configured boundary."""
     from agent.subagent_lifecycle import SubagentLaunchRequest, SubagentLifecycleService
@@ -97,6 +128,25 @@ def test_lifecycle_request_rejects_toolset_outside_worker_policy(monkeypatch):
         SubagentLifecycleService._validate_request(
             SubagentLaunchRequest(goal="run a bounded command", allowed_toolsets=("terminal",)),
             parent,
+        )
+
+
+def test_lifecycle_rejects_empty_toolset_request_under_worker_policy(monkeypatch):
+    """An explicit empty request cannot be reinterpreted as the whole worker policy."""
+    from agent.subagent_lifecycle import (
+        SubagentLaunchRequest,
+        SubagentLifecycleError,
+        SubagentLifecycleService,
+    )
+
+    monkeypatch.setattr(
+        "tools.delegate_tool_toolsets._get_configured_child_toolsets", lambda: ["terminal"]
+    )
+
+    with pytest.raises(SubagentLifecycleError, match="empty"):
+        SubagentLifecycleService._validate_request(
+            SubagentLaunchRequest(goal="run nothing", allowed_toolsets=()),
+            _parent(enabled=["delegation"]),
         )
 
 

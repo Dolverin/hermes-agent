@@ -106,6 +106,25 @@ async def get_egress_status():
     return {"text": format_status_text()}
 
 
+def _clear_optional_child_toolsets(existing: Dict[str, Any], incoming: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Interpret dashboard ``null`` as clearing the virtual optional policy.
+
+    ``/api/config`` deep-merges so schema-invisible data survives form saves.
+    This virtual field needs a distinct reset operation: YAML absence means
+    legacy parent inheritance, while ``[]`` means an explicit deny-all.
+    """
+    delegation = incoming.get("delegation")
+    if not isinstance(delegation, dict) or delegation.get("child_toolsets", object()) is not None:
+        return existing, incoming
+    existing = dict(existing)
+    existing_delegation = existing.get("delegation")
+    if isinstance(existing_delegation, dict):
+        existing["delegation"] = {key: value for key, value in existing_delegation.items() if key != "child_toolsets"}
+    incoming = dict(incoming)
+    incoming["delegation"] = {key: value for key, value in delegation.items() if key != "child_toolsets"}
+    return existing, incoming
+
+
 @router.put("/api/config")
 async def update_config(body: ConfigUpdate, profile: Optional[str] = None):
     def _run():
@@ -118,6 +137,7 @@ async def update_config(body: ConfigUpdate, profile: Optional[str] = None):
             with _CONFIG_MUTATION_LOCK:
                 existing = read_raw_config()
                 incoming = _denormalize_config_from_web(body.config)
+                existing, incoming = _clear_optional_child_toolsets(existing, incoming)
                 merged = _deep_merge(existing, incoming)
                 # Compare normalized approvals.mode across the in-memory
                 # documents, not config blocks and not cache re-reads: the page

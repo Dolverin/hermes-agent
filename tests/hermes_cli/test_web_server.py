@@ -2582,6 +2582,27 @@ class TestConfigRoundTrip:
                 mismatches.append(f"{key}: expected list, got {type(val).__name__}")
         assert not mismatches, "Type mismatches:\n" + "\n".join(mismatches)
 
+    def test_optional_child_toolsets_schema_preserves_absence_and_explicit_deny(self):
+        """Dashboard config saves preserve inherited, deny-all, and cleared policy states."""
+        from hermes_cli.config import read_raw_config, save_config
+
+        save_config({"delegation": {"max_iterations": 17}})
+        initial = self.client.get("/api/config").json()
+        schema = self.client.get("/api/config/schema").json()["fields"]
+        assert "child_toolsets" not in initial.get("delegation", {})
+        assert schema["delegation.child_toolsets"]["type"] == "optional-list"
+
+        assert self.client.put("/api/config", json={"config": initial}).status_code == 200
+        assert "child_toolsets" not in read_raw_config().get("delegation", {})
+
+        initial["delegation"]["child_toolsets"] = []
+        assert self.client.put("/api/config", json={"config": initial}).status_code == 200
+        assert read_raw_config()["delegation"]["child_toolsets"] == []
+
+        initial["delegation"]["child_toolsets"] = None
+        assert self.client.put("/api/config", json={"config": initial}).status_code == 200
+        assert "child_toolsets" not in read_raw_config().get("delegation", {})
+
     def test_desktop_terminal_font_round_trip_preserves_terminal_config(self):
         """The Appearance picker persists a font without replacing sibling settings."""
         from hermes_cli.config import load_config

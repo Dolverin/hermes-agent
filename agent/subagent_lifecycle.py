@@ -227,6 +227,8 @@ _REQUEST_REJECTIONS: tuple[tuple[Callable[[Any], bool], str], ...] = (
      "working_directory is not supported because Hermes delegates use isolated task environments."),
     (lambda r: bool(r.blocked_tools),
      "Per-tool blocking is not supported; use allowed_toolsets. Hermes always blocks unsafe child tools."),
+    (lambda r: r.allowed_toolsets is not None and not r.allowed_toolsets,
+     "allowed_toolsets must not be empty; omit it to use the configured worker policy."),
 )
 
 
